@@ -24,3 +24,13 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+build/
+dist/
+*.spec
+
+# Images and icons
+image.ico
+image.webp
+image.png
+python/image.ico
