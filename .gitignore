@@ -1,0 +1,26 @@
+# Secrets: never commit
+credentials.md
+secrets.h
+config.h
+.env
+*.env
+
+# Local-only files
+tree.txt
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Arduino / ESP32 build output
+build/
+*.elf
+*.bin
+*.hex
+*.map
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
