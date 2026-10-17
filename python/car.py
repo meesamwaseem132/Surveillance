@@ -6,16 +6,21 @@ import requests
 
 from config import CTRL_URL
 
+MOVE_CMDS = ("F", "B", "L", "R")
+FAIL_LIMIT = 3          # Failed status checks in a row before reporting the car offline
+
 
 class Car:
-    """Sends drive commands and reads status without blocking the UI."""
+    """Sends commands and reads status. Reconnects automatically and stops on link loss."""
 
     def __init__(self):
         self.cmd = "S"
         self.speed = 2
         self.distance = None
         self.connected = False
+        self.attempts = 0       # Reconnect attempts since the link was lost
 
+        self._fails = 0
         self._session = requests.Session()
         self._queue = queue.Queue(maxsize=50)
         self._running = True
@@ -26,10 +31,14 @@ class Car:
 
     # ----- Commands -----
     def _enqueue(self, **params):
+        # Don't send movement while the car is unreachable, or old commands
+        # would run as soon as the link came back.
+        if not self.connected and params.get("c") in MOVE_CMDS:
+            return
         try:
             self._queue.put_nowait(params)
         except queue.Full:
-            pass  # Drop if the network is too slow; the next command will replace it
+            pass
 
     def drive(self, cmd):
         self.cmd = cmd
@@ -62,12 +71,27 @@ class Car:
         while self._running:
             try:
                 data = self._session.get(f"{CTRL_URL}/status", timeout=0.5).json()
-                self.connected = True
+                self._fails = 0
+                self.attempts = 0
+
+                if not self.connected:
+                    # Link just came back: start stopped for safety
+                    self.connected = True
+                    self.cmd = "S"
+                    self._enqueue(c="S")
+
                 self.distance = data["distance"] if data["distance"] >= 0 else None
                 self.speed = data["speed"]
+
             except (requests.RequestException, ValueError, KeyError):
-                self.connected = False
-            time.sleep(0.3)
+                self._fails += 1
+                if self.connected and self._fails >= FAIL_LIMIT:
+                    self.connected = False
+                    self.cmd = "S"
+                if not self.connected:
+                    self.attempts += 1
+
+            time.sleep(0.3 if self.connected else 1.0)
 
     def close(self):
         self._running = False

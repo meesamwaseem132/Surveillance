@@ -21,15 +21,16 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Surveillance Car Console")
-        self.geometry("1150x680")
-        self.minsize(950, 600)
+        self.geometry("1150x700")
+        self.minsize(950, 620)
 
         self.car = Car()
         self.video = VideoStream(STREAM_URL)
         self.held_keys = set()
         self._last_frame = None
         self._ctk_img = None
-        self._was_online = None
+        self._car_was_online = None
+        self._cam_was_online = None
 
         self._build_ui()
         self._bind_keys()
@@ -59,7 +60,7 @@ class App(ctk.CTk):
         side = ctk.CTkFrame(self, corner_radius=12)
         side.grid(row=0, column=1, sticky="nsew", padx=(8, 16), pady=16)
         side.grid_columnconfigure(0, weight=1)
-        side.grid_rowconfigure(6, weight=1)
+        side.grid_rowconfigure(7, weight=1)
 
         title = ctk.CTkLabel(side, text="CAR CONTROL", font=ctk.CTkFont(size=18, weight="bold"))
         title.grid(row=0, column=0, pady=(16, 4))
@@ -105,9 +106,20 @@ class App(ctk.CTk):
                       fg_color="#B8860B", hover_color="#8B6508",
                       command=self.horn).grid(row=2, column=0, sticky="ew")
 
+        # Camera view options (flip happens on the PC, no ESP32 change needed)
+        view = ctk.CTkFrame(side, fg_color="transparent")
+        view.grid(row=6, column=0, padx=16, pady=6, sticky="ew")
+        ctk.CTkLabel(view, text="Camera view").grid(row=0, column=0, sticky="w")
+        self.mirror_var = ctk.BooleanVar(value=False)
+        self.rotate_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(view, text="Mirror (left/right)", variable=self.mirror_var,
+                        command=self._log_view).grid(row=1, column=0, sticky="w", pady=2)
+        ctk.CTkCheckBox(view, text="Rotate 180°", variable=self.rotate_var,
+                        command=self._log_view).grid(row=2, column=0, sticky="w", pady=2)
+
         # Log
-        self.log_box = ctk.CTkTextbox(side, height=130, state="disabled")
-        self.log_box.grid(row=6, column=0, padx=16, pady=(6, 16), sticky="nsew")
+        self.log_box = ctk.CTkTextbox(side, height=110, state="disabled")
+        self.log_box.grid(row=7, column=0, padx=16, pady=(6, 16), sticky="nsew")
 
     def _drive_button(self, parent, text, cmd, row, col):
         btn = ctk.CTkButton(parent, text=text, width=64, height=56,
@@ -161,29 +173,67 @@ class App(ctk.CTk):
         self.car.set_speed(int(value))
         self._log(f"Speed set to {value}")
 
+    def _log_view(self):
+        mirror = "on" if self.mirror_var.get() else "off"
+        rotate = "on" if self.rotate_var.get() else "off"
+        self._log(f"View: mirror {mirror}, rotate 180° {rotate}")
+
     # ---------- Periodic updates ----------
     def _update_video(self):
         frame = self.video.frame
         if frame is not None and frame is not self._last_frame:
             self._last_frame = frame
+
+            if self.mirror_var.get():
+                frame = cv2.flip(frame, 1)      # Left/right mirror
+            if self.rotate_var.get():
+                frame = cv2.flip(frame, -1)     # 180° rotation
+
             w, h = self.video_label.winfo_width(), self.video_label.winfo_height()
             if w > 50 and h > 50:
                 img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 img = self._fit(img, w - 16, h - 16)
                 self._ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
                 self.video_label.configure(image=self._ctk_img, text="")
+
         self.after(33, self._update_video)
 
     def _update_status(self):
-        online = self.car.connected
-        if online != self._was_online:
-            self._log("Car connected" if online else "Car connection lost")
-            self._was_online = online
-        self.conn_label.configure(text=f"● Car: {'online' if online else 'offline'}",
-                                  text_color="green" if online else "red")
-        self.cam_label.configure(text=f"● Camera: {'online' if self.video.online else 'offline'}",
-                                 text_color="green" if self.video.online else "red")
+        # Car link
+        car_online = self.car.connected
+        if car_online != self._car_was_online:
+            if car_online:
+                self._log("Car connected")
+            elif self._car_was_online is not None:
+                self._log("Car connection lost, reconnecting...")
+            self._car_was_online = car_online
 
+        if car_online:
+            car_text, car_color = "online", "green"
+        elif self.car.attempts:
+            car_text, car_color = f"reconnecting (try {self.car.attempts})", "orange"
+        else:
+            car_text, car_color = "offline", "red"
+        self.conn_label.configure(text=f"● Car: {car_text}", text_color=car_color)
+
+        # Camera link
+        cam_online = self.video.online
+        if cam_online != self._cam_was_online:
+            if cam_online:
+                self._log("Camera connected")
+            elif self._cam_was_online is not None:
+                self._log("Camera stream lost, reconnecting...")
+            self._cam_was_online = cam_online
+
+        if cam_online:
+            cam_text, cam_color = "online", "green"
+        elif self.video.retry_in > 0:
+            cam_text, cam_color = f"reconnecting in {self.video.retry_in}s", "orange"
+        else:
+            cam_text, cam_color = "connecting...", "orange"
+        self.cam_label.configure(text=f"● Camera: {cam_text}", text_color=cam_color)
+
+        # Distance
         d = self.car.distance
         if d is None:
             self.dist_value.configure(text="-- cm", text_color=("gray10", "gray90"))
