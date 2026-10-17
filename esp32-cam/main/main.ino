@@ -4,9 +4,7 @@
 #include <WiFi.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
-
-const char* WIFI_SSID = "ROBO_SURVILLIENCE_CAR";
-const char* WIFI_PASS = "17845564";
+#include "secrets.h"
 
 // AI Thinker camera pins
 #define PWDN_GPIO_NUM   32
